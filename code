@@ -1,0 +1,218 @@
+ORG 0000H
+      MOV R2, #00H       ; Count for Team 1
+      MOV R3, #00H       ; Count for Team 2
+      MOV R4, #00H       ; Count for Team 3
+      MOV R5, #00H       ; Count for Team 4
+      RS EQU P1.3        ; Register Select
+      E EQU P1.2         ; Enable
+      ; R/W* is hardwired to 0V, therefore it is always in write mode
+
+; ---------------------------------- Main -------------------------------------
+Main:		
+      CLR RS              ; RS=0 - Instruction register is selected.
+      ;-------------------------- Instructions Code -----------------------------
+      CALL FuncSet        ; Function set (4-bit mode)
+      CALL DispCon        ; Turn display and cursor on/off 
+      CALL EntryMode      ; Entry mode set - shift cursor to the right
+
+; ----------------------------- Scan for the keys -------------------------------
+Next:		
+      CALL ScanKeyPad
+      SETB RS             ; RS=1 - Data register is selected.
+      CLR A
+      MOV A, R7
+      CJNE A, #0, IncrementVote ; Only proceed if a key is pressed
+      JMP Next            ; Otherwise, keep scanning
+
+IncrementVote:
+      CALL DisplayTeam     ; Display the team that was pressed
+      JMP Main            ; Restart the main loop
+
+; ------------------------------ End Of Main ---------------------------------
+;--------------- Note: Use 7 for Update Frequency in EdSim51 -----------------
+;-------------------------------- Subroutines ---------------------------------				
+; ------------------------- Function set --------------------------------------
+FuncSet:	
+      CLR P1.7		
+      CLR P1.6		
+      SETB P1.5          ; | bit 5=1
+      CLR P1.4          ; | (DB4) DL=0 - puts LCD module into 4-bit mode 
+      CALL Pulse
+      CALL Delay         ; wait for BF to clear
+      CALL Pulse
+      SETB P1.7          ; P1.7=1 (N) - 2 lines 
+      CLR P1.6
+      CLR P1.5
+      CLR P1.4
+      CALL Pulse
+      CALL Delay
+      RET
+
+; ------------------------------- Display on/off control -----------------------
+DispCon:	
+      CLR P1.7
+      CLR P1.6
+      CLR P1.5
+      CLR P1.4          ; high nibble set (0H - hex)
+      CALL Pulse
+      SETB P1.7        ; Sets entire display ON
+      SETB P1.6        ; Cursor ON
+      SETB P1.5        ; Cursor blinking ON
+      CALL Pulse
+      CALL Delay        ; wait for BF to clear	
+      RET
+
+; ----------------------------- Entry mode set (4-bit mode) ----------------------
+EntryMode:	
+      CLR P1.7
+      CLR P1.6
+      CLR P1.5
+      CLR P1.4
+      CALL Pulse
+      CLR P1.7
+      SETB P1.6
+      SETB P1.5
+      CLR P1.4
+      CALL Pulse
+      CALL Delay        ; wait for BF to clear
+      RET
+
+; ------------------------------------ Pulse --------------------------------------
+Pulse:	
+      SETB E            ; P1.2 is connected to 'E' pin of LCD module
+      CLR E             ; negative edge on E	
+      RET
+
+; ------------------------------------- SendChar ----------------------------------			
+SendChar:	
+      MOV C, ACC.7
+      MOV P1.7, C
+      MOV C, ACC.6
+      MOV P1.6, C
+      MOV C, ACC.5
+      MOV P1.5, C
+      MOV C, ACC.4
+      MOV P1.4, C
+      CALL Pulse
+      MOV C, ACC.3
+      MOV P1.7, C
+      MOV C, ACC.2
+      MOV P1.6, C
+      MOV C, ACC.1
+      MOV P1.5, C
+      MOV C, ACC.0
+      MOV P1.4, C
+      CALL Pulse
+      CALL Delay        ; wait for BF to clear
+      RET
+
+; ------------------------------------- Delay ------------------------------------			
+Delay:		
+      MOV R0, #50
+      DJNZ R0, $
+      RET
+
+; ------------------------------- Scan Row ---------------------------------------
+ScanKeyPad:	
+      CLR P0.3               ; Clear Row3
+      CALL ROW3              ; Call scan column subroutine for Row3
+      SETB P0.3               ; Set Row 3
+      JB F0, Done             ; If F0 is set, end scan
+       
+      ; Scan Row2
+      CLR P0.2                ; Clear Row2
+      CALL ROW2               ; Call scan column subroutine for Row2
+      SETB P0.2               ; Set Row 2
+      JB F0, Done             ; If F0 is set, end scan
+       
+      JMP ScanKeyPad          ; Go back to scan Row3
+       
+Done:	
+      CLR F0                  ; Clear F0 flag before exit
+      RET
+       
+; ---------------------------- Scan Row3 Columns ----------------------------
+ROW3:	
+      JNB P0.4, KeyCode1      ; If Col0 Row3 is cleared - key found
+      JNB P0.5, KeyCode2      ; If Col1 Row3 is cleared - key found
+      JNB P0.6, KeyCode3      ; If Col2 Row3 is cleared - key found
+      RET					
+       
+; ---------------------------- Scan Row2 Columns ----------------------------
+ROW2:	
+      JNB P0.4, KeyCode4      ; If Col0 Row2 is cleared - key found
+      JNB P0.5, KeyCode4      ; If Col1 Row2 is cleared - key found
+      JNB P0.6, KeyCode4      ; If Col2 Row2 is cleared - key found
+      RET					
+       
+; ---------------------------- Key Codes (1, 2, 3, 4) ------------------------
+KeyCode1:	
+      SETB F0                 ; Key found - set F0
+      MOV R7, #1              ; Code for '1'
+      INC R2                  ; Increment count for Team 1
+      RET
+       
+KeyCode2:	
+      SETB F0                 ; Key found - set F0
+      MOV R7, #2              ; Code for '2'
+      INC R3                  ; Increment count for Team 2
+      RET
+       
+KeyCode3:	
+      SETB F0                 ; Key found - set F0
+      MOV R7, #3              ; Code for '3'
+      INC R4                  ; Increment count for Team 3
+      RET
+       
+KeyCode4:	
+      SETB F0                 ; Key found - set F0
+      MOV R7, #4              ; Code for '4'
+      INC R5                  ; Increment count for Team 4
+      RET
+       
+; ---------------------------- Display Final Results ----------------------------
+DisplayFinalResults:
+      CLR RS                   ; RS=0 - Instruction register is selected
+      MOV DPTR, #DisplayTeam ; Load the results string
+      ACALL DisplayString       ; Display the results
+      JMP Main                  ; Return to main loop to continue scanning
+
+; ---------------------------- Results String Lookup Table ----------------------
+DisplayTeam:
+      DB 'T', 'e', 'a', 'm', ' ', 'A', ' ', 0  ; Team A
+      DB 'V', 'o', 't', 'e', 's',' ', 0        ; Placeholder for Team A votes
+      DB 13, 10                                       ; Carriage return and line feed
+      DB 'T', 'e', 'a', 'm', ' ', 'B', ' ', 0  ; Team B
+      DB 'V', 'o', 't', 'e', 's', ' ', 0        ; Placeholder for Team B votes
+      DB 13, 10                                       ; Carriage return and line feed
+      DB 'T', 'e', 'a', 'm', ' ', 'C', ' ', 0  ; Team C
+      DB 'V', 'o', 't', 'e', 's', ' ', 0        ; Placeholder for Team C votes
+      DB 13, 10                                       ; Carriage return and line feed
+      DB 'T', 'e', 'a', 'm', ' ', 'D', ' ', 0  ; Team D
+      DB 'V', 'o', 't', 'e', 's', ' ', 0        ; Placeholder for Team D votes
+
+; ----------------------------- Clear LCD Subroutine ----------------------------
+LCD_Clear:
+      CLR RS                   ; RS=0 - Instruction register is selected
+      MOV A, #01H              ; Command to clear the display
+      CALL SendChar            ; Send the command to clear the LCD
+      ACALL Delay              ; Wait for the LCD to process the command
+      RET
+
+; ---------------------------- Subroutine to Display String ----------------------------
+DisplayString:
+      ; Display the string pointed by DPTR
+      CLR A	
+      MOVC A, @A + DPTR    ; Load the character from DPTR to A
+      JZ EndString         ; If character is 0, end the string
+      CALL SendChar        ; Call function to send A to display (e.g., LCD)
+      INC DPTR            ; Move to the next character
+      SJMP DisplayString   ; Repeat until null character (0) is encountered
+
+EndString:
+      RET
+
+;--------------------------------- End of subroutines ---------------------------
+	
+Stop:		
+      JMP $                 ; Infinite loop to stop execution
